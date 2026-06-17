@@ -1,0 +1,4 @@
+# Los certificados SSL (.pem) se colocan aquí.
+# Para desarrollo, ejecuta: ./scripts/generate_cert.sh
+# Para producción, coloca aquí cert.pem y key.pem válidos.
+# Estos archivos NO deben subirse al repositorio.

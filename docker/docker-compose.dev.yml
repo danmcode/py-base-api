@@ -1,0 +1,56 @@
+version: "3.9"
+
+services:
+
+  api:
+    container_name: fastapi_dev
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+    volumes:
+      - ..:/app
+    expose:
+      - "8000"
+    env_file:
+      - ../.env.dev
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  nginx:
+    container_name: nginx_dev
+    image: nginx:1.25-alpine
+    environment:
+      - NGINX_DOMAIN=test.dev
+      - NGINX_ENVSUBST_TEMPLATE_VARS=NGINX_DOMAIN
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ../docker/nginx/templates:/etc/nginx/templates:ro
+      - ../docker/nginx/certs:/etc/nginx/certs:ro
+      - ../logs/nginx:/var/log/nginx
+    depends_on:
+      - api
+
+  db:
+    container_name: postgres_dev
+    image: postgres:15-alpine
+    env_file:
+      - ../.env.dev
+    volumes:
+      - postgres_dev:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+
+volumes:
+  postgres_dev:
