@@ -1,7 +1,7 @@
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from sqlalchemy import text
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
@@ -41,9 +41,9 @@ app.add_middleware(
 
 
 @app.get("/health", tags=["health"])
-def health_check(db: Session = Depends(get_db)) -> dict:
+async def health_check(db: AsyncSession = Depends(get_db)) -> dict:
     try:
-        db.execute(text("SELECT 1"))
+        await db.execute(text("SELECT 1"))
         db_status = "connected"
     except Exception:
         db_status = "disconnected"

@@ -1,14 +1,14 @@
 # FastAPI Core Template
 
-Plantilla base para proyectos FastAPI con PostgreSQL, SQLAlchemy, Alembic, Nginx y Docker.
+Plantilla base para proyectos FastAPI con PostgreSQL, SQLAlchemy async, Alembic, Nginx y Docker.
 
 ## Stack
 
 - **Python 3.11** + **FastAPI**
-- **PostgreSQL 15** (psycopg2)
-- **SQLAlchemy 2** (síncrono)
-- **Alembic** — migraciones
-- **Nginx** — reverse proxy con SSL
+- **PostgreSQL 15** (asyncpg)
+- **SQLAlchemy 2** (async) + **Alembic** — migraciones
+- **uv** — gestión de dependencias y entornos virtuales
+- **Nginx** — reverse proxy con SSL (TLS 1.2/1.3)
 - **Docker** + **Docker Compose**
 
 ---
@@ -19,38 +19,53 @@ Plantilla base para proyectos FastAPI con PostgreSQL, SQLAlchemy, Alembic, Nginx
 base-project/
 ├── app/
 │   ├── main.py               # Entry point de FastAPI
-│   ├── alembic/              # Migraciones
+│   ├── alembic/              # Migraciones (async engine)
 │   ├── core/
-│   │   ├── config.py         # Settings (pydantic-settings)
-│   │   ├── dependencies.py   # Dependencias FastAPI (DB session)
-│   │   ├── exceptions.py     # Manejadores de excepciones
+│   │   ├── config.py         # Settings (pydantic-settings, desde .env)
+│   │   ├── dependencies.py   # Inyección de AsyncSession
+│   │   ├── exceptions.py     # Manejadores de excepciones HTTP
 │   │   ├── logger.py         # Configuración de logging
 │   │   └── security.py       # Utilidades JWT / hashing
 │   ├── db/
 │   │   ├── base.py           # Base declarativa SQLAlchemy
-│   │   └── session.py        # Engine y SessionLocal
-│   └── modules/              # Módulos de dominio (futuro)
+│   │   └── session.py        # AsyncEngine y AsyncSessionLocal
+│   └── modules/              # Módulos de dominio
 ├── docker/
-│   ├── Dockerfile.dev
-│   ├── Dockerfile.prod
+│   ├── Dockerfile.dev        # uv sync --frozen
+│   ├── Dockerfile.prod       # uv sync --frozen --no-dev
 │   ├── docker-compose.dev.yml
 │   ├── docker-compose.prod.yml
 │   └── nginx/
 │       ├── templates/
-│       │   └── default.conf.template   # Nginx (envsubst)
+│       │   └── default.conf.template   # Nginx con envsubst (NGINX_DOMAIN)
 │       └── certs/                      # Certificados SSL (no subir al repo)
 ├── scripts/
-│   └── generate_cert.sh      # Genera certificado autofirmado
-├── .env.dev.example          # Plantilla de variables de entorno para dev
-├── .env.prod.example         # Plantilla de variables de entorno para prod
-└── requirements.txt
+│   └── generate_cert.sh      # Genera certificado autofirmado (detecta WSL)
+├── pyproject.toml            # Dependencias del proyecto (uv)
+├── uv.lock                   # Lockfile reproducible
+├── .env.dev.example
+└── .env.prod.example
+```
+
+---
+
+## Requisitos previos
+
+- [Docker](https://docs.docker.com/get-docker/) y Docker Compose v2
+- [uv](https://docs.astral.sh/uv/) (para desarrollo local fuera de Docker)
+- `openssl` (para generar certificados)
+
+Instalar uv:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 ---
 
 ## Configuración inicial
 
-### 1. Clonar variables de entorno
+### 1. Variables de entorno
 
 ```bash
 cp .env.dev.example .env.dev
@@ -61,33 +76,37 @@ Edita `.env.dev` y ajusta al menos:
 | Variable | Descripción |
 |---|---|
 | `POSTGRES_PASSWORD` | Contraseña de la base de datos |
-| `DATABASE_URL` | URL completa de conexión (debe coincidir con usuario/password/db) |
-| `SECRET_KEY` | Clave secreta para JWT (cadena larga y aleatoria) |
+| `DATABASE_URL` | Debe usar driver `postgresql+asyncpg://` |
+| `SECRET_KEY` | Clave secreta JWT (cadena aleatoria larga) |
 
 Para producción:
 
 ```bash
 cp .env.prod.example .env.prod
-# Edita .env.prod con valores reales y seguros
 ```
 
-### 2. Generar certificado SSL autofirmado (solo desarrollo)
+### 2. Certificado SSL autofirmado (desarrollo)
 
 ```bash
 ./scripts/generate_cert.sh
-# Cuando pregunte el dominio, ingresa: test.dev
+# Ingresa el dominio: test.dev
 ```
 
-Esto genera `docker/nginx/certs/cert.pem` y `docker/nginx/certs/key.pem`.
+Genera `docker/nginx/certs/cert.pem` y `docker/nginx/certs/key.pem`.
 
-> **Para confiar en el certificado en Chrome/Firefox**, importa `docker/nginx/certs/cert.pem`
-> en el almacén de certificados de tu sistema o navegador.
+En **WSL**, el script detecta el entorno automáticamente, copia el certificado a `C:\Windows\Temp\` e intenta importarlo en el almacén de Windows abriendo una ventana UAC. Solo debes aceptarla.
 
 Para agregar el dominio al hosts local:
 
 ```bash
+# Linux / WSL
 echo "127.0.0.1  test.dev" | sudo tee -a /etc/hosts
+
+# Windows (PowerShell como Administrador)
+Add-Content C:\Windows\System32\drivers\etc\hosts "127.0.0.1  test.dev"
 ```
+
+> **Firefox** usa su propio almacén. Importa `cert.pem` en `about:preferences#privacy` → Ver certificados → Autoridades.
 
 ---
 
@@ -95,23 +114,22 @@ echo "127.0.0.1  test.dev" | sudo tee -a /etc/hosts
 
 ### Levantar los contenedores
 
-Los comandos de Docker Compose se ejecutan **desde la carpeta `docker/`**:
-
 ```bash
 cd docker
 docker compose -f docker-compose.dev.yml up --build
 ```
 
-O desde la raíz del proyecto:
+O desde la raíz:
 
 ```bash
 docker compose -f docker/docker-compose.dev.yml up --build
 ```
 
+El contenedor de la API monta el código fuente con hot-reload (uvicorn `--reload`). El virtualenv instalado durante el build queda aislado en un volumen anónimo (`/app/.venv`) para que el mount no lo sobreescriba.
+
 ### Verificar que funciona
 
 ```bash
-# Health check (desde dentro de la red Docker o con el dominio configurado)
 curl -k https://test.dev/health
 ```
 
@@ -125,43 +143,72 @@ Respuesta esperada:
 }
 ```
 
-La documentación interactiva (Swagger) está disponible en modo `DEBUG=true`:
-- `https://test.dev/docs`
+Documentación interactiva disponible con `DEBUG=true`:
+- `https://test.dev/docs` (Swagger UI)
+- `https://test.dev/redoc`
 
 ### Migraciones con Alembic
 
 ```bash
-# Dentro del contenedor de la API
+# Desde el contenedor de la API
 docker exec -it fastapi_dev bash
 
-# Crear migración
 alembic revision --autogenerate -m "descripcion_del_cambio"
-
-# Aplicar migraciones
 alembic upgrade head
 ```
+
+O con uv fuera del contenedor (requiere `.env` en la raíz o variable `DATABASE_URL` exportada):
+
+```bash
+uv run alembic upgrade head
+```
+
+---
+
+## Gestión de dependencias (uv)
+
+```bash
+# Instalar dependencias localmente
+uv sync
+
+# Instalar solo producción (sin grupo dev)
+uv sync --no-dev
+
+# Agregar dependencia
+uv add sqlalchemy
+
+# Agregar dependencia de desarrollo
+uv add --group dev ruff
+
+# Actualizar todas las dependencias
+uv lock --upgrade
+
+# Ejecutar comandos en el venv
+uv run pytest
+uv run alembic upgrade head
+```
+
+Los Dockerfiles usan `uv sync --frozen` para instalar exactamente lo que está en `uv.lock`, garantizando builds reproducibles.
 
 ---
 
 ## Producción
 
-### 1. Preparar variables de entorno
+### 1. Variables de entorno
 
 ```bash
 cp .env.prod.example .env.prod
-# Edita con valores seguros reales
+# Rellenar con credenciales reales y seguras
 ```
 
 ### 2. Certificado SSL
 
-Para producción coloca un certificado válido en `docker/nginx/certs/`:
+Coloca un certificado válido (ej. Let's Encrypt) en `docker/nginx/certs/`:
 
 ```
-docker/nginx/certs/cert.pem   # Certificado (o cadena de certificados)
+docker/nginx/certs/cert.pem   # Certificado (o cadena completa)
 docker/nginx/certs/key.pem    # Clave privada
 ```
-
-Agrega el dominio al DNS de tu servidor para que apunte a tu IP.
 
 ### 3. Levantar
 
@@ -176,7 +223,7 @@ docker compose -f docker-compose.prod.yml up -d
 
 | Variable | Requerida | Descripción |
 |---|---|---|
-| `DATABASE_URL` | Sí | URL de conexión PostgreSQL |
+| `DATABASE_URL` | Sí | `postgresql+asyncpg://user:pass@host:5432/db` |
 | `POSTGRES_DB` | Sí | Nombre de la base de datos |
 | `POSTGRES_USER` | Sí | Usuario de PostgreSQL |
 | `POSTGRES_PASSWORD` | Sí | Contraseña de PostgreSQL |
@@ -185,14 +232,15 @@ docker compose -f docker-compose.prod.yml up -d
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | No | Expiración de tokens (default: `30`) |
 | `ENVIRONMENT` | No | `development` o `production` |
 | `DEBUG` | No | Activa `/docs` y `/redoc` (default: `false`) |
-| `CORS_ORIGINS` | No | Lista JSON de orígenes CORS permitidos |
+| `CORS_ORIGINS` | No | Lista JSON de orígenes permitidos |
 
 ---
 
 ## Seguridad
 
-- Los archivos `.env.dev` y `.env.prod` están en `.gitignore` — **nunca los subas al repositorio**.
-- Los certificados `.pem` también están en `.gitignore`.
-- En producción, la base de datos solo es accesible dentro de la red Docker (no expone puertos al host).
-- Nginx aplica cabeceras de seguridad: `HSTS`, `X-Frame-Options`, `X-Content-Type-Options`.
-- El endpoint `/docs` y `/redoc` solo están disponibles con `DEBUG=true`.
+- `.env.dev`, `.env.prod` y los archivos `.pem` están en `.gitignore` — **nunca los subas al repositorio**.
+- En producción, la base de datos no expone puertos al host (solo red interna Docker).
+- Nginx aplica cabeceras: `HSTS`, `X-Frame-Options`, `X-Content-Type-Options`, `X-XSS-Protection`.
+- `/docs` y `/redoc` solo están disponibles con `DEBUG=true`.
+- El driver asyncpg usa conexiones no bloqueantes; no hay `psycopg2` ni threads síncronos.
+

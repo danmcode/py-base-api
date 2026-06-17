@@ -9,6 +9,7 @@ services:
       dockerfile: docker/Dockerfile.dev
     volumes:
       - ..:/app
+      - /app/.venv  # preserva el virtualenv instalado durante el build
     expose:
       - "8000"
     env_file:
