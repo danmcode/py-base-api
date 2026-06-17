@@ -269,6 +269,8 @@ docker/nginx/certs/*.crt
 
 # Application logs
 logs/
+!logs/app/.gitkeep
+!logs/errors/.gitkeep
 
 # Spyder project settings
 .spyderproject

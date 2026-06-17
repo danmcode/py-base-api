@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     # App
     ENVIRONMENT: str = "development"
     DEBUG: bool = False
+    LOG_DIR: str = "logs"
 
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:5173"]
